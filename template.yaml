@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  SlackWebhookUrl:
+    Type: String
+    Description: Slack Webhook URL
+    NoEcho: true
+  TargetAccessKeyId:
+    Type: String
+    Description: Access Key ID for target AWS account
+    NoEcho: true
+  TargetSecretAccessKey:
+    Type: String
+    Description: Secret Access Key for target AWS account
+    NoEcho: true
+  TargetRegion:
+    Type: String
+    Default: 'ap-south-1'
+
+Resources:
+  R53ScanTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: r53-scan-history
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: scanDate
+          AttributeType: S
+      KeySchema:
+        - AttributeName: scanDate
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  R53ScanFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/index.handler
+      Runtime: nodejs18.x
+      CodeUri: ./lambda
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+          TABLE_NAME: !Ref R53ScanTable
+          TARGET_ACCESS_KEY_ID: !Ref TargetAccessKeyId
+          TARGET_SECRET_ACCESS_KEY: !Ref TargetSecretAccessKey
+          TARGET_REGION: !Ref TargetRegion
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref R53ScanTable
+        - Statement:
+          - Effect: Allow
+            Action:
+              - route53:ListHostedZones
+              - route53:ListResourceRecordSets
+            Resource: '*'
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Description: Trigger R53 scan every 5 minutes
+            Enabled: false
+
+  R53ScanLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${R53ScanFunction}
+      RetentionInDays: 30 
